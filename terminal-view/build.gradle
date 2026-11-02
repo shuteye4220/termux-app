@@ -28,6 +28,11 @@ android {
         targetCompatibility JavaVersion.VERSION_1_8
     }
 
+    testOptions {
+        // The emulator calls SystemClock, which is not available in JVM unit tests.
+        unitTests.returnDefaultValues = true
+    }
+
     publishing {
         multipleVariants {
             withSourcesJar()
