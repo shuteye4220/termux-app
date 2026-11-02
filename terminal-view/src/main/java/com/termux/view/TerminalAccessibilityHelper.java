@@ -225,6 +225,10 @@ final class TerminalAccessibilityHelper extends AccessibilityNodeProvider {
             copyToClipboard(item.text);
             return true;
         }
+        if (action == R.id.terminal_accessibility_action_auto_read) {
+            toggleAutoRead();
+            return true;
+        }
         return false;
     }
 
@@ -240,9 +244,7 @@ final class TerminalAccessibilityHelper extends AccessibilityNodeProvider {
         info.setScrollable(canScrollBack || canScrollForward);
         if (canScrollBack) info.addAction(AccessibilityAction.ACTION_SCROLL_BACKWARD);
         if (canScrollForward) info.addAction(AccessibilityAction.ACTION_SCROLL_FORWARD);
-        info.addAction(new AccessibilityAction(R.id.terminal_accessibility_action_auto_read,
-            mView.getContext().getString(isAutoRead() ? R.string.terminal_accessibility_auto_read_turn_off
-                : R.string.terminal_accessibility_auto_read_turn_on)));
+        info.addAction(autoReadAction());
         return info;
     }
 
@@ -276,17 +278,29 @@ final class TerminalAccessibilityHelper extends AccessibilityNodeProvider {
         node.addAction(AccessibilityAction.ACTION_CLICK);
         node.addAction(new AccessibilityAction(R.id.terminal_accessibility_action_copy_line,
             mView.getContext().getString(R.string.terminal_accessibility_copy_line)));
+        // Also on each line, as screen readers move between the lines and not the terminal itself.
+        node.addAction(autoReadAction());
         return node;
+    }
+
+    private AccessibilityAction autoReadAction() {
+        return new AccessibilityAction(R.id.terminal_accessibility_action_auto_read,
+            mView.getContext().getString(isAutoRead() ? R.string.terminal_accessibility_auto_read_turn_off
+                : R.string.terminal_accessibility_auto_read_turn_on));
+    }
+
+    private void toggleAutoRead() {
+        boolean autoRead = !isAutoRead();
+        setAutoRead(autoRead);
+        announce(mView.getContext().getString(autoRead ? R.string.terminal_accessibility_auto_read_on
+            : R.string.terminal_accessibility_auto_read_off));
     }
 
     private boolean performHostAction(int action, Bundle arguments) {
         if (action == AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD) return scrollPage(-1);
         if (action == AccessibilityNodeInfo.ACTION_SCROLL_FORWARD) return scrollPage(1);
         if (action == R.id.terminal_accessibility_action_auto_read) {
-            boolean autoRead = !isAutoRead();
-            setAutoRead(autoRead);
-            announce(mView.getContext().getString(autoRead ? R.string.terminal_accessibility_auto_read_on
-                : R.string.terminal_accessibility_auto_read_off));
+            toggleAutoRead();
             return true;
         }
         // This does not come back to the provider, so it cannot loop.
