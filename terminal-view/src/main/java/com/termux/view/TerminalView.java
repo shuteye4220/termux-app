@@ -332,6 +332,13 @@ public final class TerminalView extends View {
                 // https://github.com/termux/termux-app/issues/137 (japanese chars and TYPE_NULL).
                 outAttrs.inputType = InputType.TYPE_NULL;
             }
+
+            // Screen reader braille keyboards, like TalkBack's and Backtalk's, only send a newline
+            // to fields that say they are multi-line, and refuse it otherwise. sendTextToTerminal()
+            // turns the newline into Enter. Only while a screen reader is running, so other
+            // keyboards see the same input type as before.
+            if (mAccessibilityHelper.isActive())
+                outAttrs.inputType |= InputType.TYPE_TEXT_FLAG_MULTI_LINE;
         } else {
             // Corresponds to android:inputType="text"
             outAttrs.inputType =  InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_NORMAL;
