@@ -26,7 +26,7 @@ import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewConfiguration;
 import android.view.ViewTreeObserver;
-import android.view.accessibility.AccessibilityManager;
+import android.view.accessibility.AccessibilityNodeProvider;
 import android.view.autofill.AutofillManager;
 import android.view.autofill.AutofillValue;
 import android.view.inputmethod.BaseInputConnection;
@@ -123,7 +123,8 @@ public final class TerminalView extends View {
      */
     private String[] mAutoFillHints = new String[0];
 
-    private final boolean mAccessibilityEnabled;
+    /** Screen reader support: a line per accessibility item, and new output spoken. */
+    private final TerminalAccessibilityHelper mAccessibilityHelper;
 
     /** The {@link KeyEvent} is generated from a virtual keyboard, like manually with the {@link KeyEvent#KeyEvent(int, int)} constructor. */
     public final static int KEY_EVENT_SOURCE_VIRTUAL_KEYBOARD = KeyCharacterMap.VIRTUAL_KEYBOARD; // -1
@@ -257,8 +258,7 @@ public final class TerminalView extends View {
             }
         });
         mScroller = new Scroller(context);
-        AccessibilityManager am = (AccessibilityManager) context.getSystemService(Context.ACCESSIBILITY_SERVICE);
-        mAccessibilityEnabled = am.isEnabled();
+        mAccessibilityHelper = new TerminalAccessibilityHelper(this);
     }
 
 
@@ -293,6 +293,7 @@ public final class TerminalView extends View {
         mTermSession = session;
         mEmulator = null;
         mCombiningAccent = 0;
+        mAccessibilityHelper.onSessionChanged();
 
         // The emulator's cached value will be read in `updateSize()` when emulator is set.
         setTopRow(0, false);
@@ -493,10 +494,11 @@ public final class TerminalView extends View {
             setTopRow(0);
         }
 
+        // Before the scroll counter is cleared, so the helper knows how far the output moved.
+        mAccessibilityHelper.onScreenUpdated(mEmulator.getScrollCounter(), mEmulator.isAlternateBufferActive());
         mEmulator.clearScrollCounter();
 
         invalidate();
-        if (mAccessibilityEnabled) setContentDescription(getText());
     }
 
     /** This must be called by the hosting activity in {@link Activity#onContextMenuClosed(Menu)}
@@ -858,6 +860,7 @@ public final class TerminalView extends View {
 
         final boolean controlDown = controlDownFromEvent || mClient.readControlKey();
         final boolean altDown = leftAltDownFromEvent || mClient.readAltKey();
+        mAccessibilityHelper.onUserInput(eventSource, codePoint, controlDown || altDown);
 
         if (mClient.onCodePoint(codePoint, controlDown, mTermSession)) return;
 
@@ -911,6 +914,8 @@ public final class TerminalView extends View {
 
     /** Input the specified keyCode if applicable and return if the input was consumed. */
     public boolean handleKeyCode(int keyCode, int keyMod) {
+        mAccessibilityHelper.onUserInput(KEY_EVENT_SOURCE_VIRTUAL_KEYBOARD, -1, true);
+
         // Ensure cursor is shown when a key is pressed down like long hold on (arrow) keys
         if (mEmulator != null)
             mEmulator.setCursorBlinkState(true);
@@ -1015,6 +1020,7 @@ public final class TerminalView extends View {
 
             scrollTo(0, 0);
             invalidate();
+            mAccessibilityHelper.onSizeChanged();
         }
     }
 
@@ -1040,8 +1046,41 @@ public final class TerminalView extends View {
         return mTermSession;
     }
 
-    private CharSequence getText() {
-        return mEmulator.getScreen().getSelectedText(0, mTopRow, mEmulator.mColumns, mTopRow + mEmulator.mRows);
+    @Override
+    public AccessibilityNodeProvider getAccessibilityNodeProvider() {
+        // Only while a service is running, as the provider also feeds the assist structure.
+        if (mAccessibilityHelper != null && mAccessibilityHelper.isActive()) return mAccessibilityHelper;
+        return super.getAccessibilityNodeProvider();
+    }
+
+    @Override
+    protected boolean dispatchHoverEvent(MotionEvent event) {
+        // Touch exploration of the lines when a screen reader is running.
+        if (mAccessibilityHelper != null && mAccessibilityHelper.dispatchHoverEvent(event)) return true;
+        return super.dispatchHoverEvent(event);
+    }
+
+    /**
+     * A screen reader activated a line, e.g. with a double tap. Does what a tap on the line does.
+     *
+     * @param row The first row of the line, as an external row of the screen buffer.
+     */
+    boolean onAccessibilityClick(int row) {
+        if (mEmulator == null || mRenderer == null) return false;
+        if (isSelectingText()) {
+            stopTextSelectionMode();
+            return true;
+        }
+        requestFocus();
+        long time = SystemClock.uptimeMillis();
+        float y = mRenderer.mFontLineSpacingAndAscent + (row - mTopRow + 0.5f) * mRenderer.mFontLineSpacing;
+        MotionEvent event = MotionEvent.obtain(time, time, MotionEvent.ACTION_UP, mRenderer.mFontWidth / 2, y, 0);
+        try {
+            mClient.onSingleTapUp(event);
+        } finally {
+            event.recycle();
+        }
+        return true;
     }
 
     public int getCursorX(float x) {
@@ -1072,7 +1111,9 @@ public final class TerminalView extends View {
     }
 
     public void setTopRow(int topRow, boolean updateEmulator) {
+        boolean changed = mTopRow != topRow;
         mTopRow = topRow;
+        if (changed && mAccessibilityHelper != null) mAccessibilityHelper.onTopRowChanged();
         if (updateEmulator && mEmulator != null) {
             mEmulator.setTopRow(mTopRow);
         }
@@ -1462,6 +1503,7 @@ public final class TerminalView extends View {
     @Override
     protected void onDetachedFromWindow() {
         super.onDetachedFromWindow();
+        mAccessibilityHelper.onDetached();
 
         if (mTextSelectionCursorController != null) {
             // Might solve the following exception

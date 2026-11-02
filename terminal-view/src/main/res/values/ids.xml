@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Custom accessibility actions of the terminal view. -->
+    <item name="terminal_accessibility_action_copy_line" type="id" />
+    <item name="terminal_accessibility_action_auto_read" type="id" />
+</resources>
