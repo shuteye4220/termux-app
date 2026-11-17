@@ -12,6 +12,7 @@ import android.text.SpannableString;
 import android.text.Spanned;
 import android.text.style.TtsSpan;
 import android.view.MotionEvent;
+import android.view.View;
 import android.view.ViewParent;
 import android.view.accessibility.AccessibilityEvent;
 import android.view.accessibility.AccessibilityManager;
@@ -88,6 +89,9 @@ final class TerminalAccessibilityHelper extends AccessibilityNodeProvider {
      */
     private long mScrolledTotal;
     private int mFocusedId = INVALID_ID;
+    /** The line being read by character or word, and where in it the screen reader is. */
+    private int mTraversalId = INVALID_ID;
+    private int mTraversalPosition;
     private int mHoveredId = INVALID_ID;
 
     private final TerminalChangeReader mChangeReader;
@@ -220,6 +224,10 @@ final class TerminalAccessibilityHelper extends AccessibilityNodeProvider {
             case AccessibilityNodeInfo.ACTION_FOCUS:
                 // Keyboard input always goes to the terminal itself.
                 return mView.requestFocus();
+            case AccessibilityNodeInfo.ACTION_NEXT_AT_MOVEMENT_GRANULARITY:
+                return traverse(item, arguments, true);
+            case AccessibilityNodeInfo.ACTION_PREVIOUS_AT_MOVEMENT_GRANULARITY:
+                return traverse(item, arguments, false);
         }
         if (action == R.id.terminal_accessibility_action_copy_line) {
             copyToClipboard(item.text);
@@ -276,11 +284,57 @@ final class TerminalAccessibilityHelper extends AccessibilityNodeProvider {
         node.addAction(focused ? AccessibilityAction.ACTION_CLEAR_ACCESSIBILITY_FOCUS
             : AccessibilityAction.ACTION_ACCESSIBILITY_FOCUS);
         node.addAction(AccessibilityAction.ACTION_CLICK);
+        // Reading by character and word, the way screen readers read a TextView.
+        node.setMovementGranularities(AccessibilityNodeInfo.MOVEMENT_GRANULARITY_CHARACTER
+            | AccessibilityNodeInfo.MOVEMENT_GRANULARITY_WORD);
+        node.addAction(AccessibilityAction.ACTION_NEXT_AT_MOVEMENT_GRANULARITY);
+        node.addAction(AccessibilityAction.ACTION_PREVIOUS_AT_MOVEMENT_GRANULARITY);
         node.addAction(new AccessibilityAction(R.id.terminal_accessibility_action_copy_line,
             mView.getContext().getString(R.string.terminal_accessibility_copy_line)));
         // Also on each line, as screen readers move between the lines and not the terminal itself.
         node.addAction(autoReadAction());
         return node;
+    }
+
+    /**
+     * Moves through a line by character or word, as {@link View} does for its text, and tells the
+     * screen reader what was passed over.
+     *
+     * @return false at either end of the line, so the screen reader goes on to the next line
+     */
+    private boolean traverse(LineItem item, @Nullable Bundle arguments, boolean forward) {
+        int granularity = arguments == null ? 0
+            : arguments.getInt(AccessibilityNodeInfo.ACTION_ARGUMENT_MOVEMENT_GRANULARITY_INT);
+        boolean word;
+        if (granularity == AccessibilityNodeInfo.MOVEMENT_GRANULARITY_CHARACTER) word = false;
+        else if (granularity == AccessibilityNodeInfo.MOVEMENT_GRANULARITY_WORD) word = true;
+        else return false;
+
+        String text = item.text;
+        // The line may have changed since the last step, as new output arrived.
+        int position = item.id == mTraversalId ? Math.min(mTraversalPosition, text.length()) : -1;
+        if (position < 0) position = forward ? 0 : text.length();
+        int[] range = forward ? LineTextSegments.following(text, position, word)
+            : LineTextSegments.preceding(text, position, word);
+        if (range == null) return false;
+
+        mTraversalId = item.id;
+        mTraversalPosition = forward ? range[1] : range[0];
+
+        AccessibilityEvent event = AccessibilityEvent.obtain(
+            AccessibilityEvent.TYPE_VIEW_TEXT_TRAVERSED_AT_MOVEMENT_GRANULARITY);
+        event.setPackageName(mView.getContext().getPackageName());
+        event.setClassName(TextView.class.getName());
+        event.setEnabled(true);
+        event.getText().add(text);
+        event.setFromIndex(range[0]);
+        event.setToIndex(range[1]);
+        event.setAction(forward ? AccessibilityNodeInfo.ACTION_NEXT_AT_MOVEMENT_GRANULARITY
+            : AccessibilityNodeInfo.ACTION_PREVIOUS_AT_MOVEMENT_GRANULARITY);
+        event.setMovementGranularity(granularity);
+        event.setSource(mView, item.id);
+        sendEvent(event);
+        return true;
     }
 
     private AccessibilityAction autoReadAction() {
@@ -311,6 +365,8 @@ final class TerminalAccessibilityHelper extends AccessibilityNodeProvider {
         if (!isActive() || mFocusedId == id) return false;
         if (mFocusedId != INVALID_ID) clearAccessibilityFocus(mFocusedId);
         mFocusedId = id;
+        // Reading by character or word starts over on the newly focused line.
+        mTraversalId = INVALID_ID;
         mView.invalidate();
         sendLineEvent(id, AccessibilityEvent.TYPE_VIEW_ACCESSIBILITY_FOCUSED);
         return true;
