@@ -2,4 +2,17 @@
   <string name="paste_text">Paste</string>
   <string name="copy_text">Copy</string>
   <string name="text_selection_more">More…</string>
+
+  <!-- Screen reader support. -->
+  <string name="terminal_accessibility_copy_line">Copy line</string>
+  <string name="terminal_accessibility_line_copied">Line copied</string>
+  <string name="terminal_accessibility_auto_read_turn_off">Stop reading new output</string>
+  <string name="terminal_accessibility_auto_read_turn_on">Read new output</string>
+  <string name="terminal_accessibility_auto_read_off">Not reading new output</string>
+  <string name="terminal_accessibility_auto_read_on">Reading new output</string>
+  <string name="terminal_accessibility_output_trimmed">Earlier output skipped.</string>
+  <!-- Spoken for a space under the cursor or typed. -->
+  <string name="terminal_accessibility_space">space</string>
+  <!-- Spoken for an empty line, or the cursor after the end of the text. -->
+  <string name="terminal_accessibility_blank">blank</string>
 </resources>
